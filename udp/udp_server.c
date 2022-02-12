@@ -103,7 +103,7 @@ int main(int argc, char **argv) {
       error("ERROR on inet_ntoa\n");
     printf("server received datagram from %s (%s)\n", 
 	   hostp->h_name, hostaddrp);
-    printf("server received %d/%d bytes: %s\n", strlen(buf), n, buf);
+    printf("server received %ld/%d bytes: %s\n", strlen(buf), n, buf);
     
     /* 
      * sendto: echo the input back to the client 
@@ -124,8 +124,58 @@ int main(int argc, char **argv) {
       strncpy(file, "rm", 2);
       strncpy(file+2, buf+6, BUFSIZE);
       system(file);
+      bzero(file, BUFSIZE);
     }
 
-    
+    if((strncmp(buf, "get", 3)) == 0){
+
+      //Null pointer
+      char* source=NULL;
+      printf("opening the file!\n");
+      //file to read from
+      FILE* filep =popen(buf+3, "r");
+
+      if(filep!= NULL){
+        printf("Seeking the end!\n");
+        //Find the EOF
+        if(fseek(filep,0L, SEEK_END) == 0){
+          //get the size of the file
+          long sourcesize = ftell(filep);
+
+          //store the size of file in a buffer and send that first
+          file[0] = (char)sourcesize;
+          printf("Sending the size of file!\n");
+          n = sendto(sockfd, file, 1, 0, (struct sockaddr *) &clientaddr, clientlen);
+          if (n < 0) 
+            error("ERROR in sendto");                
+          
+          if(sourcesize == -1){
+            error("Error in filesize!!\n");
+          }
+          
+          //malloc required size for the buffer
+          source = malloc(sizeof(char) * sourcesize);
+
+          printf("Starting to copy from zero!\n");
+          //Go back to start to copy the contents
+          if(fseek(filep,0L, SEEK_SET)!=0){
+            error("Error in fseek!!\n");
+          }
+
+          //read the file contents
+          size_t newLen = fread(source, sizeof(char), sourcesize, filep);
+
+          //apend null after eof
+          source[newLen++] = '\0';
+
+      printf("Sending the actual file!\n");
+      //send the actual file contents
+      n = sendto(sockfd, source, newLen, 0, (struct sockaddr *) &clientaddr, clientlen);
+      if (n < 0) 
+        error("ERROR in sendto");      
+     
+        }
+      } 
+    }    
   }
 }

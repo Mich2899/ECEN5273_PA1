@@ -10,15 +10,67 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h> 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 
 #define BUFSIZE 1024
 
-int sockfd;
+int sockfd, n;
 char buf1[BUFSIZE];
+char buf[BUFSIZE];
+int serverlen;
+struct sockaddr_in serveraddr;  
+
+/* 
+ * error - wrapper for perror
+ */
+void error(char *msg) {
+    perror(msg);
+    exit(0);
+}
+
 /*
  * get - wrapper for get
  */
 void get(char* filename){
+  int newfd, writeret;
+  char newbuf[BUFSIZE];
+  long pointer_size;
+  char* dest=NULL;
+
+  printf("Opening the file!\n");
+  newfd = open(filename, O_CREAT|O_RDWR, 0666);
+  if(newfd==-1){
+    error("Error in file creation %d!\n");
+  }
+
+  bzero(buf, BUFSIZE);
+
+  printf("Receive the size of the file!\n");
+  n = recvfrom(sockfd, buf, strlen(buf), 0, (struct sockaddr *)&serveraddr, &serverlen);
+    if (n < 0) 
+      error("ERROR in recvfrom");
+
+  /*Acknowledgement*/
+  n = sendto(sockfd, buf, strlen(buf), 0, (struct sockaddr *)&serveraddr, serverlen);
+  if (n < 0) 
+    error("ERROR in sendto");
+
+
+  pointer_size = (long)buf[0];
+
+  printf("Malloc the pointer!\n");
+  dest = malloc(sizeof(char) * pointer_size);
+
+  printf("Receie the actual file!\n");
+    n = recvfrom(sockfd, dest, pointer_size, 0, (struct sockaddr *)&serveraddr, &serverlen);
+    if (n < 0) 
+      error("ERROR in recvfrom");
+
+  printf("Write into the file!\n");
+  writeret = write(newfd, dest, pointer_size);
 
 }
 
@@ -56,18 +108,8 @@ void delete(char* filename){
    exit(0);
  }
 
-/* 
- * error - wrapper for perror
- */
-void error(char *msg) {
-    perror(msg);
-    exit(0);
-}
-
 int main(int argc, char **argv) {
-    int portno, n;
-    int serverlen;
-    struct sockaddr_in serveraddr;    
+    int portno;  
     struct hostent *server;
     char *hostname;
     char buf[BUFSIZE];
@@ -108,12 +150,12 @@ int main(int argc, char **argv) {
 
     /* send the message to the server */
     serverlen = sizeof(serveraddr);
-    n = sendto(sockfd, buf, strlen(buf), 0, &serveraddr, serverlen);
+    n = sendto(sockfd, buf, strlen(buf), 0, (struct sockaddr *)&serveraddr, serverlen);
     if (n < 0) 
       error("ERROR in sendto");
     
     /* print the server's reply */
-    n = recvfrom(sockfd, buf, strlen(buf), 0, &serveraddr, &serverlen);
+    n = recvfrom(sockfd, buf, strlen(buf), 0, (struct sockaddr *)&serveraddr, &serverlen);
     if (n < 0) 
       error("ERROR in recvfrom");
     printf("Echo from server: %s", buf);
@@ -129,37 +171,42 @@ int main(int argc, char **argv) {
        
         /* get input from user */
         bzero(input, BUFSIZE);
-        fgets(input, BUFSIZE, stdin);
+        fgets(input, BUFSIZE, stdin);     
 
         if((strncmp(input, "get", 3)) == 0){
+          n = sendto(sockfd, input, 4, 0, (struct sockaddr *)&serveraddr, serverlen);
+          if (n < 0) 
+            error("ERROR in sendto");     
+
           file = input+4;
           get(file);
+          printf("File received!!!\n");
         }
 
         else if((strncmp(input, "put", 3)) == 0){
+          n = sendto(sockfd, input, 4, 0, (struct sockaddr *)&serveraddr, serverlen);
+          if (n < 0) 
+            error("ERROR in sendto");  
+
           file = input+4;
           put(file);          
         }
 
-        else if((strncmp(input, "delete", 6)) == 0){
-          n = sendto(sockfd, input, BUFSIZE, 0, &serveraddr, serverlen);
-            if (n < 0) 
-              error("ERROR in sendto");             
+        else if((strncmp(input, "delete", 6)) == 0){          
         }
 
         else if((strncmp(input, "ls", 2)) == 0){
           ls();
-          n = sendto(sockfd, buf1, BUFSIZE, 0, &serveraddr, serverlen);
+          n = sendto(sockfd, buf1, BUFSIZE, 0, (struct sockaddr *)&serveraddr, serverlen);
             if (n < 0) 
               error("ERROR in sendto");     
           
         }
 
         else if((strncmp(input, "exit", 4)) == 0){
-            n = sendto(sockfd, input, 4, 0, &serveraddr, serverlen);
-            if (n < 0) 
-              error("ERROR in sendto");     
-
+          n = sendto(sockfd, input, 4, 0, (struct sockaddr *)&serveraddr, serverlen);
+          if (n < 0) 
+            error("ERROR in sendto");            
           exit_func();
         }
 
