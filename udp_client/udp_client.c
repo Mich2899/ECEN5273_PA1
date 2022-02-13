@@ -16,12 +16,13 @@
 
 
 #define BUFSIZE 1024
+#define FILE2KB 2*1000*8
 
 int sockfd, n;
-char buf1[BUFSIZE];
 char buf[BUFSIZE];
 int serverlen;
 struct sockaddr_in serveraddr;  
+char savefile[BUFSIZE];
 
 /* 
  * error - wrapper for perror
@@ -35,15 +36,14 @@ void error(char *msg) {
  * get - wrapper for get
  */
 void get(char* filename){
-  int newfd, writeret;
+  int writeret;
   char newbuf[BUFSIZE];
   long pointer_size;
-  char* dest=NULL;
 
   printf("Opening the file!\n");
-  newfd = open(filename, O_CREAT|O_RDWR, 0666);
-  if(newfd==-1){
-    error("Error in file creation %d!\n");
+  int filefd = open(filename, O_CREAT| O_RDWR, 0777);
+  if(filefd==-1){
+    error("Error in file open!\n");
   }
 
   bzero(buf, BUFSIZE);
@@ -53,24 +53,36 @@ void get(char* filename){
     if (n < 0) 
       error("ERROR in recvfrom");
 
+  //save the filesize
+  long filesize = (long)*buf;
+
+    buf[0] = 'A';
+
   /*Acknowledgement*/
   n = sendto(sockfd, buf, strlen(buf), 0, (struct sockaddr *)&serveraddr, serverlen);
   if (n < 0) 
     error("ERROR in sendto");
 
+  //Make a loop here to send chunks of file in size of 2KB and recieve ack after every send
+  for(long i=0; i<filesize; i+=FILE2KB*sizeof(char)){
 
-  pointer_size = (long)buf[0];
+    bzero(newbuf, BUFSIZE);
 
-  printf("Malloc the pointer!\n");
-  dest = malloc(sizeof(char) * pointer_size);
-
-  printf("Receie the actual file!\n");
-    n = recvfrom(sockfd, dest, pointer_size, 0, (struct sockaddr *)&serveraddr, &serverlen);
+    /*receive data*/
+    n = recvfrom(sockfd, newbuf, strlen(buf), 0, (struct sockaddr *)&serveraddr, &serverlen);
     if (n < 0) 
       error("ERROR in recvfrom");
 
-  printf("Write into the file!\n");
-  writeret = write(newfd, dest, pointer_size);
+    /*write into the file*/
+    writeret = write(filefd, newbuf, FILE2KB*sizeof(char));
+
+    buf[0] = 'A';
+    /*Acknowledgement*/
+    n = sendto(sockfd, buf, strlen(buf), 0, (struct sockaddr *)&serveraddr, serverlen);
+    if (n < 0) 
+      error("ERROR in sendto");
+  }
+  close(filefd);
 
 }
 
@@ -81,29 +93,10 @@ void put(char* filename){
 
 }
 
-/* 
- * delete - wrapper for delete
- */
-void delete(char* filename){
-
-}
-
-/*
- * ls - wrapper for ls
- */
- void ls(){
-  FILE* filep;
-   filep = popen("ls *","r");
-   fread(buf1, 1, BUFSIZE, filep);
-   printf("Output ls: %s\n", buf1);
-   pclose(filep);
- }
-
 /*
  * exit - wrapper for exit
  */
  void exit_func(){
-   printf("Exiting......\n");
    close(sockfd);
    exit(0);
  }
@@ -114,7 +107,7 @@ int main(int argc, char **argv) {
     char *hostname;
     char buf[BUFSIZE];
     char input[BUFSIZE];
-    char* file=NULL;
+    char file[BUFSIZE];
 
     /* check command line arguments */
     if (argc != 3) {
@@ -170,43 +163,60 @@ int main(int argc, char **argv) {
           "5. exit\n");
        
         /* get input from user */
+        bzero(buf, BUFSIZE);
         bzero(input, BUFSIZE);
         fgets(input, BUFSIZE, stdin);     
 
-        if((strncmp(input, "get", 3)) == 0){
-          n = sendto(sockfd, input, 4, 0, (struct sockaddr *)&serveraddr, serverlen);
-          if (n < 0) 
-            error("ERROR in sendto");     
+        n = sendto(sockfd, input, BUFSIZE, 0, (struct sockaddr *)&serveraddr, serverlen);
+        if (n < 0) 
+          error("ERROR in sendto");   
 
-          file = input+4;
+        if((strncmp(input, "get ", 4)) == 0){
+
+          strncpy(file, input+4, strlen(input));
+
+          for(int i=0;i<strlen(file);i++){
+            if(file[i]=='\n'){
+              file[i]='\0';
+          }
+          }
+          
+          printf("filename:%s\n",file);
           get(file);
           printf("File received!!!\n");
         }
 
         else if((strncmp(input, "put", 3)) == 0){
-          n = sendto(sockfd, input, 4, 0, (struct sockaddr *)&serveraddr, serverlen);
-          if (n < 0) 
-            error("ERROR in sendto");  
-
-          file = input+4;
+          strncpy(file, input+4, strlen(input));
           put(file);          
         }
 
-        else if((strncmp(input, "delete", 6)) == 0){          
+        else if((strncmp(input, "delete", 6)) == 0){
+          strncpy(file, input+6, strlen(input));
+          //delete the file          
+          /* print the server's reply */
+          n = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&serveraddr, &serverlen);
+          if (n < 0) 
+            error("ERROR in recvfrom");
+          printf("File deleted from server: %s\n", buf);          
         }
 
-        else if((strncmp(input, "ls", 2)) == 0){
-          ls();
-          n = sendto(sockfd, buf1, BUFSIZE, 0, (struct sockaddr *)&serveraddr, serverlen);
-            if (n < 0) 
-              error("ERROR in sendto");     
-          
+        else if((strncmp(input, "ls", 2)) == 0){        
+          /* print the server's reply */
+          n = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&serveraddr, &serverlen);
+          if (n < 0) 
+            error("ERROR in recvfrom");
+          printf("ls output: %s\n", buf);  
         }
 
         else if((strncmp(input, "exit", 4)) == 0){
-          n = sendto(sockfd, input, 4, 0, (struct sockaddr *)&serveraddr, serverlen);
+              /* print the server's reply */
+          n = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&serveraddr, &serverlen);
           if (n < 0) 
-            error("ERROR in sendto");            
+            error("ERROR in recvfrom");
+          printf("%s", buf);    
+
+          //exit          
           exit_func();
         }
 
