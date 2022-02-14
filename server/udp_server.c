@@ -14,6 +14,7 @@
 #include <arpa/inet.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <errno.h>
 
 #define BUFSIZE 1024
 #define FILE2KB 2*1000*8
@@ -39,6 +40,7 @@ int main(int argc, char **argv) {
   int n; /* message byte size */
   char file[BUFSIZE];
   char buf1[BUFSIZE];
+  int packet=0;
 
   /* 
    * check command line arguments 
@@ -86,11 +88,13 @@ int main(int argc, char **argv) {
   clientlen = sizeof(clientaddr);
   while (1) {
 
+    char ack[]={"ACK"};
     /*
      * recvfrom: receive a UDP datagram from a client
      */
     bzero(buf, BUFSIZE);
     bzero(file, BUFSIZE);
+
     n = recvfrom(sockfd, buf, BUFSIZE, 0,
 		 (struct sockaddr *) &clientaddr, &clientlen);
     if (n < 0)
@@ -127,7 +131,7 @@ int main(int argc, char **argv) {
     }
 
     else if((strncmp(buf, "delete", 6)) == 0){
-        printf("filename: %s\n", buf+6);
+        //printf("filename: %s\n", buf+6);
         char deletefile[BUFSIZE];
 
         bzero(deletefile, BUFSIZE);
@@ -136,7 +140,7 @@ int main(int argc, char **argv) {
         strncpy(file, "rm ", 3);
         strncpy(file+3, buf+6, BUFSIZE);
         strncpy(deletefile, buf+6, BUFSIZE);
-        printf("file to delete:%s\n", deletefile);
+        //printf("file to delete:%s\n", deletefile);
         system(file);
 
           //ack
@@ -150,14 +154,13 @@ int main(int argc, char **argv) {
     }
 
     else if((strncmp(buf, "ls", 2)) == 0){
-        char buf1[BUFSIZE];
 
         bzero(buf1, BUFSIZE);
 
         FILE* filep;
         filep = popen("ls *","r");
         size_t readret = fread(buf1, 1, BUFSIZE, filep);
-        printf("Output ls: %s, readret: %ld\n", buf1, readret);
+        printf("Output ls: %s\n", buf1);
 
           //ack
           n = sendto(sockfd, buf1, strlen(buf1), 0, 
@@ -171,12 +174,18 @@ int main(int argc, char **argv) {
 
     else if((strncmp(buf, "get ", 4)) == 0){
 
-        //Null pointer
-        char* source=NULL;
-        struct stat* finfo;
-        long filesize;     
+      // char msg[]={"ACK...\n"};
 
-        strncpy(file, buf+4, strlen(buf));
+      // n = sendto(sockfd, msg, strlen(msg), 0, 
+      //     (struct sockaddr *) &clientaddr, clientlen);
+      // if (n < 0) 
+      //   error("ERROR in sendto");         
+
+      
+        struct stat finfo;
+        off_t filesize;     
+
+        strncpy(file, buf+4, strlen(buf)-4);
 
         for(int i=0;i<=strlen(file);i++){
           if(file[i]=='\n'){
@@ -186,60 +195,138 @@ int main(int argc, char **argv) {
 
         printf("filename:%s\n", file);
         //file to read from
-        int filefd =open(file, O_CREAT| O_RDWR, 0777);
+        int filefd = open(file, O_RDWR, 0777);
+
+        //printf("filefd: %d\n",filefd);
 
         if(filefd==-1){
-          printf("filefd:%d\n", filefd);
           error("Error in opening the file!\n");
         }
 
+        int fstatret=fstat(filefd, &finfo);
         //fstat to get file data
-        if(fstat(filefd, finfo)){
+        if(fstatret<0){
           error("File does not exist!\n");
         }
 
-        //store the filesize
-        filesize = (long)finfo->st_size;
+        filesize = finfo.st_size;
 
-        //clear buffer
-        bzero(buf, BUFSIZE);
-        *source = filesize;
-
-        ssize_t newLen = read(filefd, buf1, filesize);
-        printf("Read %ld bytes from file\n", newLen);
-
-        close(filefd);
-
-        //send filesize
-        n = sendto(sockfd, source, strlen(source), 0, (struct sockaddr *) &clientaddr, clientlen);
+        /*send the filesize*/
+        n = sendto(sockfd, &finfo.st_size, sizeof(off_t), 0, 
+            (struct sockaddr *) &clientaddr, clientlen);
         if (n < 0) 
-          error("ERROR in sendto");  
+          error("ERROR in sendto");       
 
-        //receive ack
-        n = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *) &clientaddr, &clientlen);
-        if (n < 1)
-          error("ERROR in recvfrom");      
+        n = recvfrom(sockfd, buf, BUFSIZE, 0,
+        (struct sockaddr *) &clientaddr, &clientlen);
+        if (n < 0)
+          error("ERROR in recvfrom");
+          printf("Ack msg:%s\n", buf);
+             
+        char readbuf[2000];
+        int readret=0;
+        bzero(readbuf, 2000);
+        bzero(buf,BUFSIZE);
 
-        //Make a loop here to send chunks of file in size of 2KB and recieve ack after every send
-        for(long i=0; i<=filesize; i+= FILE2KB*sizeof(char)){
+          //Make a loop here to send chunks of file in size of 2KB and recieve ack after every send
+          //for(off_t i=0; i<=filesize; i+= FILE2KB*sizeof(char)){
 
-            //clear both the buffer to receive ack
-            bzero(buf, BUFSIZE);
+            while((readret = read(filefd, readbuf, 2000))>0){        
+               
+              // printf("readret:%d\n", readret);
+              //send filesize 
+                  n = sendto(sockfd, readbuf, readret, 0, 
+                (struct sockaddr *) &clientaddr, clientlen);
+                  if (n < 0) 
+                    error("ERROR in sendto"); 
+                  packet++;
+                  printf("Packet number:%d\n", packet);
 
-            //send filesize
-            n = sendto(sockfd, buf1+i, FILE2KB*sizeof(char), 0, (struct sockaddr *) &clientaddr, clientlen);
-            if (n < 0) 
-              error("ERROR in sendto");  
+                  //receive ack
+                  n = recvfrom(sockfd, buf, BUFSIZE, 0,
+                  (struct sockaddr *) &clientaddr, &clientlen);
+                  if (n < 0)
+                    error("ACK not receieved!!"); 
+                  printf("ACK: %s\n", buf);
 
-            //receive ack
-            n = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *) &clientaddr, &clientlen);
-            if (n < 1)
-              error("ACK not receieved!!"); 
-            printf("ACK: %s\n", buf);
-
-      }
-
+                  bzero(readbuf,2000);
+                  bzero(buf, BUFSIZE);                  
+            }
+            packet=0;
+      close(filefd);
     } 
+
+    else if((strncmp(buf, "put ", 4)) == 0){
+
+          int filesize;   
+          int writeret;   
+
+          bzero(file, BUFSIZE);
+
+          // /*ACK*/
+          // n = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&serveraddr, &serverlen);
+          // if (n < 0) 
+          //   error("ERROR in recvfrom");
+          // printf("msg: %s\n", buf);  
+
+              //printf("Receive the size of the file!\n");
+              //Receive the size of the file
+              n = recvfrom(sockfd, &filesize, sizeof(int), 0,
+              (struct sockaddr *) &clientaddr, &clientlen);
+              if (n < 0)
+                error("ERROR in recvfrom");                  
+
+              /*Acknowledgement*/
+              n = sendto(sockfd, ack, strlen(ack), 0, 
+              (struct sockaddr *)&clientaddr, clientlen);
+              if (n < 0) 
+                error("ERROR in sendto");
+
+          /*Copy the filename*/
+          strncpy(file, buf+4, strlen(buf));
+          
+          /*append null to avoid newline*/
+          for(int i=0;i<strlen(file);i++){
+            if(file[i]=='\n'){
+              file[i]='\0';
+            }
+          }
+
+          printf("filename:%s filesize:%d\n",file, filesize);
+
+              printf("Opening the file!\n");
+              int filefd = open(file, O_CREAT| O_RDWR| O_TRUNC, 0777);
+              if(filefd==-1){
+                error("Error in file open!\n");
+              }
+
+              char newbuf[2000];
+              int flag=0;
+
+              //Make a loop here to receive chunks of file in size of 2KB and recieve ack after every send
+              for(int i=0; i<=filesize;i+=2000){
+
+                bzero(newbuf, 2000);
+
+                /*receive data*/
+                n = recvfrom(sockfd, newbuf, 2000, 0,
+                 (struct sockaddr *)&clientaddr, &clientlen);
+                if (n < 0) 
+                  error("ERROR in recvfrom");
+                
+                /*write into the file*/
+                writeret = write(filefd, newbuf, n);
+
+                /*Acknowledgement*/
+                n = sendto(sockfd, ack, strlen(ack), 0,
+                 (struct sockaddr *)&clientaddr, clientlen);
+                if (n < 0) 
+                  error("ERROR in sendto");
+              }
+              close(filefd);
+
+          printf("File received!!!\n");
+    }
 
     else{
         /* 
@@ -250,6 +337,6 @@ int main(int argc, char **argv) {
         if (n < 0) 
           error("ERROR in sendto");
 
-        }
+    }
   }    
 }
