@@ -36,7 +36,6 @@ int main(int argc, char **argv) {
     int sockfd, n;
     int serverlen;
     struct sockaddr_in serveraddr;  
-    char savefile[BUFSIZE];
     int packet=0;
 
     /* check command line arguments */
@@ -78,7 +77,7 @@ int main(int argc, char **argv) {
       error("ERROR in sendto");
     
     /* print the server's reply */
-    n = recvfrom(sockfd, buf, strlen(buf), 0, (struct sockaddr *)&serveraddr, &serverlen);
+    n = recvfrom(sockfd, buf, strlen(buf), 0, (struct sockaddr *)&serveraddr, (socklen_t * restrict)&serverlen);
     if (n < 0) 
       error("ERROR in recvfrom");
     printf("Echo from server: %s\n", buf);
@@ -109,7 +108,7 @@ int main(int argc, char **argv) {
           //strncpy(file, input+6, strlen(input));
           //delete the file          
           /* print the server's reply */
-          n = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&serveraddr, &serverlen);
+          n = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&serveraddr, (socklen_t * restrict)&serverlen);
           if (n < 0) 
             error("ERROR in recvfrom");
           printf("File deleted from server: %s\n", buf);          
@@ -123,7 +122,7 @@ int main(int argc, char **argv) {
             error("ERROR in sendto");             
 
           /* print the server's reply */
-          n = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&serveraddr, &serverlen);
+          n = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&serveraddr, (socklen_t * restrict)&serverlen);
           if (n < 0) 
             error("ERROR in recvfrom");
           printf("ls output: %s\n", buf);  
@@ -137,7 +136,7 @@ int main(int argc, char **argv) {
             error("ERROR in sendto");   
 
               /* print the server's reply */
-          n = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&serveraddr, &serverlen);
+          n = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&serveraddr, (socklen_t * restrict)&serverlen);
           if (n < 0) 
             error("ERROR in recvfrom");
           printf("%s", buf);    
@@ -167,7 +166,7 @@ int main(int argc, char **argv) {
               //printf("Receive the size of the file!\n");
               //Receive the size of the file
               n = recvfrom(sockfd, &filesize, sizeof(int), 0,
-              (struct sockaddr *) &serveraddr, &serverlen);
+              (struct sockaddr *) &serveraddr, (socklen_t * restrict)&serverlen);
               if (n < 0)
                 error("ERROR in recvfrom");                  
 
@@ -196,7 +195,6 @@ int main(int argc, char **argv) {
               }
 
               char newbuf[2000];
-              int flag=0;
 
               //Make a loop here to receive chunks of file in size of 2KB and recieve ack after every send
               for(int i=0; i<=filesize;i+=2000){
@@ -205,12 +203,13 @@ int main(int argc, char **argv) {
 
                 /*receive data*/
                 n = recvfrom(sockfd, newbuf, 2000, 0,
-                 (struct sockaddr *)&serveraddr, &serverlen);
+                 (struct sockaddr *)&serveraddr, (socklen_t * restrict)&serverlen);
                 if (n < 0) 
                   error("ERROR in recvfrom");
                 
                 /*write into the file*/
                 writeret = write(filefd, newbuf, n);
+                printf("%d number of bytes written to file\n", writeret);
 
                 /*Acknowledgement*/
                 n = sendto(sockfd, ack, strlen(ack), 0,
@@ -226,7 +225,7 @@ int main(int argc, char **argv) {
         else if((strncmp(input, "put ", 4)) == 0){
 
         struct stat finfo;
-        off_t filesize;     
+        //off_t filesize;     
         bzero(file, BUFSIZE);
 
         n = sendto(sockfd, input, BUFSIZE, 0, (struct sockaddr *)&serveraddr, serverlen);
@@ -258,7 +257,7 @@ int main(int argc, char **argv) {
           error("File does not exist!\n");
         }
 
-        filesize = finfo.st_size;
+        //filesize = finfo.st_size;
 
         /*send the filesize*/
         n = sendto(sockfd, &finfo.st_size, sizeof(off_t), 0, 
@@ -267,10 +266,10 @@ int main(int argc, char **argv) {
           error("ERROR in sendto");       
 
         n = recvfrom(sockfd, buf, BUFSIZE, 0,
-        (struct sockaddr *) &serveraddr, &serverlen);
+        (struct sockaddr *) &serveraddr, (socklen_t * restrict)&serverlen);
         if (n < 0)
           error("ERROR in recvfrom");
-          printf("Ack msg:%s\n", buf);
+        printf("Ack msg:%s\n", buf);
              
         char readbuf[2000];
         int readret=0;
@@ -292,7 +291,7 @@ int main(int argc, char **argv) {
 
                   //receive ack
                   n = recvfrom(sockfd, buf, BUFSIZE, 0,
-                  (struct sockaddr *) &serveraddr, &serverlen);
+                  (struct sockaddr *) &serveraddr, (socklen_t * restrict)&serverlen);
                   if (n < 0)
                     error("ACK not receieved!!"); 
                   printf("ACK: %s\n", buf);
